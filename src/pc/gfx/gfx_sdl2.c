@@ -34,8 +34,8 @@
 #include "../cliopts.h"
 
 #include "src/pc/controller/controller_keyboard.h"
-#include "src/pc/controller/controller_sdl.h"
 #include "src/pc/controller/controller_touchscreen.h"
+#include "src/pc/controller/controller_sdl.h"
 #include "src/pc/controller/controller_bind_mapping.h"
 #include "pc/utils/misc.h"
 
@@ -45,11 +45,6 @@
 #else
 # define FRAMERATE 30
 #endif
-
-#ifdef __ANDROID__
-extern int render_multiplier;
-#endif
-
 // time between consequtive game frames
 static const f64 sFrameTime = 1.0 / ((double)FRAMERATE);
 static f64 sFrameTargetTime = 0;
@@ -60,81 +55,15 @@ static SDL_GLContext ctx = NULL;
 static kb_callback_t kb_key_down = NULL;
 static kb_callback_t kb_key_up = NULL;
 static void (*kb_all_keys_up)(void) = NULL;
+static void (*kb_text_input)(char*) = NULL;
 static void (*touch_down_callback)(void* event);
 static void (*touch_motion_callback)(void* event);
 static void (*touch_up_callback)(void* event);
-static void (*kb_text_input)(char*) = NULL;
 
 #define IS_FULLSCREEN() ((SDL_GetWindowFlags(wnd) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
 
-static inline void sys_sleep(const uint64_t us) {
-    // TODO: not everything has usleep()
-    usleep(us);
-}
-
-static int test_vsync(void) {
-    // Even if SDL_GL_SetSwapInterval succeeds, it doesn't mean that VSync actually works.
-    // A 60 Hz monitor should have a swap interval of 16.67 milliseconds.
-    // Try to detect the length of a vsync by swapping buffers some times.
-    // Since the graphics card may enqueue a fixed number of frames,
-    // first send in four dummy frames to hopefully fill the queue.
-    // This method will fail if the refresh rate is changed, which, in
-    // combination with that we can't control the queue size (i.e. lag)
-    // is a reason this generic SDL2 backend should only be used as last resort.
-
-    for (int i = 0; i < 8; ++i)
-        SDL_GL_SwapWindow(wnd);
-
-    Uint32 start = SDL_GetTicks();
-    SDL_GL_SwapWindow(wnd);
-    SDL_GL_SwapWindow(wnd);
-    SDL_GL_SwapWindow(wnd);
-    SDL_GL_SwapWindow(wnd);
-    Uint32 end = SDL_GetTicks();
-
-    const float average = 4.0 * 1000.0 / (end - start);
-
-#ifndef __ANDROID__
-    if (average > 27.0f && average < 33.0f) return 1;
-    if (average > 57.0f && average < 63.0f) return 2;
-    if (average > 86.0f && average < 94.0f) return 3;
-    if (average > 115.0f && average < 125.0f) return 4;
-    if (average > 234.0f && average < 246.0f) return 8;
-
-    return 0;
-#else
-    /*Android's vsync seems finicky but timer based sync seems unusable too.
-     * I think vsync does kind of work but not half-vsync and stuff like that.
-     * Let's try to render multiple times if neccessary to lower the framerate.
-     * I don't think this is a great solution but it works.
-     * On SGI models, turning vsync off will help with framerate, but the best is 60fps patch.
-     * The actual solution would be to render or copy the buffer to a texture
-     * and then render that to the screen.*/
-    render_multiplier = (average + 15) / 30;
-    if (render_multiplier == 0)
-        render_multiplier = 1;
-
-    return 1;
-#endif
-}
-
 static inline void gfx_sdl_set_vsync(const bool enabled) {
-    if (enabled) {
-        // try to detect refresh rate
-        SDL_GL_SetSwapInterval(1);
-        const int vblanks = gCLIOpts.SyncFrames ? (int)gCLIOpts.SyncFrames : test_vsync();
-        if (vblanks) {
-            printf("determined swap interval: %d\n", vblanks);
-            SDL_GL_SetSwapInterval(vblanks);
-            use_timer = false;
-            return;
-        } else {
-            printf("could not determine swap interval, falling back to timer sync\n");
-        }
-    }
-
-    use_timer = true;
-    SDL_GL_SetSwapInterval(0);
+    SDL_GL_SetSwapInterval(enabled);
 }
 
 static void gfx_sdl_set_fullscreen(void) {
@@ -175,9 +104,8 @@ static void gfx_sdl_reset_dimension_and_pos(void) {
 
 static void gfx_sdl_init(const char *window_title) {
     SDL_Init(SDL_INIT_VIDEO);
-
 	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
- 
+	
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
@@ -341,43 +269,10 @@ static void gfx_sdl_set_touchscreen_callbacks(void (*down)(void* event), void (*
 }
 
 static bool gfx_sdl_start_frame(void) {
-    static Uint32 last_time = 0;
-    bool ret = true;
-    Uint32 ticks = SDL_GetTicks();
-    if ((last_time == 0) || (last_time + 10000 < ticks))
-        last_time = ticks;
-    if (last_time + frame_time < ticks)
-        ret = false;
-    last_time += frame_time;
-    return ret;
-}
-
-static inline void sync_framerate_with_timer(void) {
-    static double last_time;
-    static double last_sec;
-    static int frames_since_last_sec;
-    const double now = SDL_GetPerformanceCounter();
-    frames_since_last_sec += 1;
-    if (last_time) {
-        const double elapsed = last_sec ? (now - last_sec) : (now - last_time);
-        if ((elapsed < frame_time && !last_sec) || (elapsed < frames_since_last_sec * frame_time && last_sec)) {
-            const double delay = last_sec ? frames_since_last_sec * frame_time - elapsed : frame_time - elapsed;
-            sys_sleep(delay / perf_freq * 1000000.0);
-            last_time = now + delay;
-        } else {
-            last_time = now;
-        }
-        if ((int64_t)(now / perf_freq) > (int64_t)(last_sec / perf_freq)) {
-            last_sec = last_time;
-            frames_since_last_sec = 0;
-        }
-    } else {
-        last_time = now;
-    }
+    return true;
 }
 
 static void gfx_sdl_swap_buffers_begin(void) {
-    if (use_timer) sync_framerate_with_timer();
     SDL_GL_SwapWindow(wnd);
 }
 
