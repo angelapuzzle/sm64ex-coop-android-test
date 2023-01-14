@@ -54,8 +54,8 @@ TEXTSAVES ?= 0
 EXTERNAL_DATA ?= 0
 # Enable Discord Rich Presence (outdated, no longer supported)
 DISCORDRPC ?= 0
-# Enable Discord Game SDK (used for Discord server hosting)
-DISCORD_SDK ?= 1
+# Disable Discord Game SDK (used for Discord server hosting)
+DISCORD_SDK ?= 0
 # Enable docker build workarounds
 DOCKERBUILD ?= 0
 # Enable compiling with more debug info.
@@ -635,11 +635,11 @@ else ifeq ($(OSX_BUILD),1)
   # I copied the library and gave it two names.
   # This really shouldn't be required, but I got tired of trying to do it the "right way"
   BASS_LIBS := lib/bass/bass.dylib lib/bass/libbass.dylib lib/bass/bass_fx.dylib lib/bass/libbass_fx.dylib
-else ifeq ($(TARGET_RPI),1)
-	ifneq (,$(findstring aarch64,$(machine)))
-    BASS_LIBS := lib/bass/arm/aarch64/libbass.so lib/bass/arm/aarch64/libbass_fx.so
-  else
+else ifeq ($(TARGET_ANDROID),1)
+	ifeq ($(TARGET_BITS), 32)
     BASS_LIBS := lib/bass/arm/libbass.so lib/bass/arm/libbass_fx.so
+  else
+    BASS_LIBS := lib/bass/arm/aarch64/libbass.so lib/bass/arm/aarch64/libbass_fx.so
   endif
 else
   BASS_LIBS := lib/bass/libbass.so lib/bass/libbass_fx.so
@@ -944,23 +944,7 @@ endif
 LDFLAGS += -lz
 
 # Lua
-ifeq ($(WINDOWS_BUILD),1)
-  ifeq ($(TARGET_BITS), 32)
-    LDFLAGS += -Llib/lua/win32 -l:liblua53.a
-  else
-    LDFLAGS += -Llib/lua/win64 -l:liblua53.a
-  endif
-else ifeq ($(OSX_BUILD),1)
-  LDFLAGS += -L./lib/lua/mac/ -l lua53
-else ifeq ($(TARGET_RPI),1)
-	ifneq (,$(findstring aarch64,$(machine)))
-    LDFLAGS += -Llib/lua/linux -l:liblua53-arm64.a
-  else
-    LDFLAGS += -Llib/lua/linux -l:liblua53-arm.a
-  endif
-else
-  LDFLAGS += -Llib/lua/linux -l:liblua53.a
-endif
+# Install liblua53 on termux instead
 
 # Network/Discord/Bass (ugh, needs cleanup)
 ifeq ($(WINDOWS_BUILD),1)
