@@ -6,6 +6,7 @@ RUN apt-get update && \
         bsdmainutils \
         build-essential \
         libcapstone-dev \
+		wget \
         pkgconf \
         python3 \
         libz-dev

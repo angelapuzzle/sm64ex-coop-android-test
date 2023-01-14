@@ -37,10 +37,11 @@ OSX_BUILD ?= 0
 TARGET_ARCH ?= native
 TARGET_BITS ?= 0
 
+TOUCH_CONTROLS ?= 1
 # Enable immediate load by default
 IMMEDIATELOAD ?= 1
-# Enable better camera by default
-BETTERCAMERA ?= 1
+# Disable better camera by default
+BETTERCAMERA ?= 0
 # Enable no drawing distance by default
 NODRAWINGDISTANCE ?= 1
 # Disable texture fixes by default (helps with them purists)
@@ -131,6 +132,13 @@ endif
 
 ifeq ($(HOST_OS),Windows)
   WINDOWS_BUILD := 1
+  else
+    ifneq ($(shell which termux-setup-storage),)
+      TARGET_ANDROID := 1
+      ifeq ($(shell dpkg -s apksigner | grep Version | sed "s/Version: //"),0.7-2)
+        OLD_APKSIGNER := 1
+      endif
+    endif
 endif
 
 # MXE overrides
@@ -312,6 +320,10 @@ ifeq ($(TARGET_RPI),1) # Define RPi to change SDL2 title & GLES2 hints
      DEFINES += USE_GLES=1
 endif
 
+ifeq ($(TARGET_ANDROID),1)
+     DEFINES += USE_GLES=1
+endif
+
 ifeq ($(OSX_BUILD),1) # Modify GFX & SDL2 for OSX GL
      DEFINES += OSX_BUILD=1
 endif
@@ -441,14 +453,7 @@ ifeq ($(filter clean distclean print-%,$(MAKECMDGOALS)),)
   endif
 
   # Make tools if out of date
-  ifeq ($(WINDOWS_AUTO_BUILDER),0)
-    $(info Building tools...)
-    #DUMMY != $(MAKE) -s -C $(TOOLS_DIR) $(if $(filter-out ido0,$(COMPILER)$(USE_QEMU_IRIX)),all-except-recomp,) >&2 || echo FAIL
-    DUMMY != $(MAKE) -C $(TOOLS_DIR) >&2 || echo FAIL
-      ifeq ($(DUMMY),FAIL)
-        $(error Failed to build tools)
-      endif
-  endif
+  DUMMY != make -C tools >&2 || echo FAIL
 
   $(info Building Game...)
 
@@ -480,11 +485,17 @@ BUILD_DIR := $(BUILD_DIR_BASE)/$(VERSION)_pc
 
 ifeq ($(WINDOWS_BUILD),1)
 	EXE := $(BUILD_DIR)/$(TARGET_STRING).exe
-else # Linux builds/binary namer
-	ifeq ($(TARGET_RPI),1)
-		EXE := $(BUILD_DIR)/$(TARGET_STRING).arm
-	else
-		EXE := $(BUILD_DIR)/$(TARGET_STRING)
+else
+	ifeq ($(TARGET_ANDROID),1)
+		EXE := $(BUILD_DIR)/libmain.so
+		APK := $(BUILD_DIR)/$(TARGET).unsigned.apk
+		APK_SIGNED := $(BUILD_DIR)/$(TARGET).apk
+		else # Linux builds/binary namer
+		ifeq ($(TARGET_RPI),1)
+			EXE := $(BUILD_DIR)/$(TARGET).arm
+			else
+			EXE := $(BUILD_DIR)/$(TARGET)
+		endif
 	endif
 endif
 
@@ -660,6 +671,9 @@ endif
 #==============================================================================#
 # Compiler Options                                                             #
 #==============================================================================#
+ifeq ($(TARGET_ANDROID),1)
+INCLUDE_CFLAGS += -I SDL/include
+endif
 
 AS        := $(CROSS)as
 
@@ -783,6 +797,8 @@ ifeq ($(WINDOW_API),DXGI)
 else ifeq ($(findstring SDL,$(WINDOW_API)),SDL)
   ifeq ($(WINDOWS_BUILD),1)
     BACKEND_LDFLAGS += -lglew32 -lglu32 -lopengl32
+  else ifeq ($(TARGET_ANDROID),1)
+    BACKEND_LDFLAGS += -lGLESv2
   else ifeq ($(TARGET_RPI),1)
     BACKEND_LDFLAGS += -lGLESv2
   else ifeq ($(OSX_BUILD),1)
@@ -816,10 +832,8 @@ else ifeq ($(SDL1_USED),1)
 endif
 
 ifneq ($(SDL1_USED)$(SDL2_USED),00)
-  ifeq ($(OSX_BUILD),1)
-    # on OSX at least the homebrew version of sdl-config gives include path as `.../include/SDL2` instead of `.../include`
-    OSX_PREFIX := $(shell $(SDLCONFIG) --prefix)
-    BACKEND_CFLAGS += -I$(OSX_PREFIX)/include $(shell $(SDLCONFIG) --cflags)
+  ifeq ($(TARGET_ANDROID),1)
+    BACKEND_LDFLAGS += -lhidapi -lSDL2
   else
     BACKEND_CFLAGS += `$(SDLCONFIG) --cflags`
   endif
@@ -888,6 +902,20 @@ ifeq ($(WINDOWS_BUILD),1)
   endif
 else ifeq ($(TARGET_RPI),1)
   LDFLAGS := $(OPT_FLAGS) -lm $(BACKEND_LDFLAGS) -no-pie
+
+else ifeq ($(TARGET_ANDROID),1)
+  ifneq ($(shell uname -m | grep "i.86"),)
+    ARCH_APK := x86
+  else ifeq ($(shell uname -m),x86_64)
+    ARCH_APK := x86_64
+  else ifeq ($(shell getconf LONG_BIT),64)
+    ARCH_APK := arm64-v8a
+  else
+    ARCH_APK := armeabi-v7a
+  endif
+  CFLAGS  += -fPIC
+  LDFLAGS := -L./android/lib/$(ARCH_APK)/ -lm $(BACKEND_LDFLAGS) -shared
+
 else ifeq ($(OSX_BUILD),1)
   LDFLAGS := -lm $(BACKEND_LDFLAGS) -lpthread
 else
@@ -979,6 +1007,10 @@ ifeq ($(DEBUG),1)
 endif
 
 # Check for enhancement options
+ifeq ($(TOUCH_CONTROLS),1)
+  CC_CHECK += -DTOUCH_CONTROLS
+  CFLAGS += -DTOUCH_CONTROLS
+endif
 
 # Check for immediate load option
 ifeq ($(IMMEDIATELOAD),1)
@@ -1145,14 +1177,25 @@ all: $(BASEPACK_PATH)
 res: $(BASEPACK_PATH)
 
 # prepares the basepack.lst
-$(BASEPACK_LST): $(EXE)
-	@$(PRINT) "$(GREEN)Making basepack list.$(NO_COL)\n"
+$(BASEPACK_LST): $(EXE_DEPEND)
 	@mkdir -p $(BUILD_DIR)/$(BASEDIR)
 	@echo -n > $(BASEPACK_LST)
-	@echo "$(BUILD_DIR)/sound/bank_sets sound/bank_sets" >> $(BASEPACK_LST)
-	@echo "$(BUILD_DIR)/sound/sequences.bin sound/sequences.bin" >> $(BASEPACK_LST)
-	@echo "$(BUILD_DIR)/sound/sound_data.ctl sound/sound_data.ctl" >> $(BASEPACK_LST)
-	@echo "$(BUILD_DIR)/sound/sound_data.tbl sound/sound_data.tbl" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/bank_sets.be.64 sound/bank_sets.be.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/bank_sets.be.32 sound/bank_sets.be.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/bank_sets.le.64 sound/bank_sets.le.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/bank_sets.le.32 sound/bank_sets.le.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sequences.bin.be.64 sound/sequences.bin.be.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sequences.bin.be.32 sound/sequences.bin.be.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sequences.bin.le.64 sound/sequences.bin.le.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sequences.bin.le.32 sound/sequences.bin.le.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.ctl.be.64 sound/sound_data.ctl.be.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.ctl.be.32 sound/sound_data.ctl.be.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.ctl.le.64 sound/sound_data.ctl.le.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.ctl.le.32 sound/sound_data.ctl.le.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.tbl.be.64 sound/sound_data.tbl.be.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.tbl.be.32 sound/sound_data.tbl.be.32" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.tbl.le.64 sound/sound_data.tbl.le.64" >> $(BASEPACK_LST)
+	@echo "$(BUILD_DIR)/sound/sound_data.tbl.le.32 sound/sound_data.tbl.le.32" >> $(BASEPACK_LST)
 	@$(foreach f, $(wildcard $(SKYTILE_DIR)/*), echo $(f) gfx/$(f:$(BUILD_DIR)/%=%) >> $(BASEPACK_LST);)
 	@find actors -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
 	@find levels -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
@@ -1166,7 +1209,13 @@ $(BASEPACK_PATH): $(BASEPACK_LST)
 endif
 
 #all: $(ROM)
+ifeq ($(TARGET_ANDROID),1)
+all: $(APK_SIGNED)
+EXE_DEPEND := $(APK_SIGNED)
+else
 all: $(EXE)
+EXE_DEPEND := $(EXE)
+endif
 
 ifeq ($(WINDOWS_BUILD),1)
 exemap: $(EXE)
@@ -1217,7 +1266,11 @@ ifeq ($(TARGET_N64),1)
 endif
 
 $(BUILD_DIR)/src/game/characters.o:   $(SOUND_SAMPLE_TABLES)
-$(SOUND_BIN_DIR)/sound_data.o:        $(SOUND_BIN_DIR)/sound_data.ctl.inc.c $(SOUND_BIN_DIR)/sound_data.tbl.inc.c $(SOUND_BIN_DIR)/sequences.bin.inc.c $(SOUND_BIN_DIR)/bank_sets.inc.c
+$(SOUND_BIN_DIR)/sound_data.o: \
+	$(SOUND_BIN_DIR)/sound_data.ctl.be.64.inc.c $(SOUND_BIN_DIR)/sound_data.tbl.be.64.inc.c $(SOUND_BIN_DIR)/sequences.bin.be.64.inc.c $(SOUND_BIN_DIR)/bank_sets.be.64.inc.c \
+	$(SOUND_BIN_DIR)/sound_data.ctl.be.32.inc.c $(SOUND_BIN_DIR)/sound_data.tbl.be.32.inc.c $(SOUND_BIN_DIR)/sequences.bin.be.32.inc.c $(SOUND_BIN_DIR)/bank_sets.be.32.inc.c \
+	$(SOUND_BIN_DIR)/sound_data.ctl.le.64.inc.c $(SOUND_BIN_DIR)/sound_data.tbl.le.64.inc.c $(SOUND_BIN_DIR)/sequences.bin.le.64.inc.c $(SOUND_BIN_DIR)/bank_sets.le.64.inc.c \
+	$(SOUND_BIN_DIR)/sound_data.ctl.le.32.inc.c $(SOUND_BIN_DIR)/sound_data.tbl.le.32.inc.c $(SOUND_BIN_DIR)/sequences.bin.le.32.inc.c $(SOUND_BIN_DIR)/bank_sets.le.32.inc.c
 $(BUILD_DIR)/levels/scripts.o:        $(BUILD_DIR)/include/level_headers.h
 
 ifeq ($(VERSION),sh)
@@ -1360,11 +1413,28 @@ $(ENDIAN_BITWIDTH): $(TOOLS_DIR)/determine-endian-bitwidth.c
 	@$(RM) $@.dummy1
 	@$(RM) $@.dummy2
 
-$(SOUND_BIN_DIR)/sound_data.ctl: sound/sound_banks/ $(SOUND_BANK_FILES) $(SOUND_SAMPLE_AIFCS) $(ENDIAN_BITWIDTH)
-	@$(PRINT) "$(GREEN)Generating:  $(BLUE)$@ $(NO_COL)\n"
-	$(V)$(PYTHON) $(TOOLS_DIR)/assemble_sound.py $(BUILD_DIR)/sound/samples/ sound/sound_banks/ $(SOUND_BIN_DIR)/sound_data.ctl $(SOUND_BIN_DIR)/ctl_header $(SOUND_BIN_DIR)/sound_data.tbl $(SOUND_BIN_DIR)/tbl_header $(C_DEFINES) $$(cat $(ENDIAN_BITWIDTH))
+$(SOUND_BIN_DIR)/sound_data.ctl.be.64: sound/sound_banks/ $(SOUND_BANK_FILES) $(SOUND_SAMPLE_AIFCS)
+	$(PYTHON) tools/assemble_sound.py $(BUILD_DIR)/sound/samples/ sound/sound_banks/ $(SOUND_BIN_DIR)/sound_data.ctl.be.64 $(SOUND_BIN_DIR)/sound_data.tbl.be.64 $(VERSION_CFLAGS) --endian big --bitwidth 64
 
-$(SOUND_BIN_DIR)/sound_data.tbl: $(SOUND_BIN_DIR)/sound_data.ctl
+$(SOUND_BIN_DIR)/sound_data.ctl.be.32: sound/sound_banks/ $(SOUND_BANK_FILES) $(SOUND_SAMPLE_AIFCS)
+	$(PYTHON) tools/assemble_sound.py $(BUILD_DIR)/sound/samples/ sound/sound_banks/ $(SOUND_BIN_DIR)/sound_data.ctl.be.32 $(SOUND_BIN_DIR)/sound_data.tbl.be.32 $(VERSION_CFLAGS) --endian big --bitwidth 32
+
+$(SOUND_BIN_DIR)/sound_data.ctl.le.64: sound/sound_banks/ $(SOUND_BANK_FILES) $(SOUND_SAMPLE_AIFCS)
+	$(PYTHON) tools/assemble_sound.py $(BUILD_DIR)/sound/samples/ sound/sound_banks/ $(SOUND_BIN_DIR)/sound_data.ctl.le.64 $(SOUND_BIN_DIR)/sound_data.tbl.le.64 $(VERSION_CFLAGS) --endian little --bitwidth 64
+
+$(SOUND_BIN_DIR)/sound_data.ctl.le.32: sound/sound_banks/ $(SOUND_BANK_FILES) $(SOUND_SAMPLE_AIFCS)
+	$(PYTHON) tools/assemble_sound.py $(BUILD_DIR)/sound/samples/ sound/sound_banks/ $(SOUND_BIN_DIR)/sound_data.ctl.le.32 $(SOUND_BIN_DIR)/sound_data.tbl.le.32 $(VERSION_CFLAGS) --endian little --bitwidth 32
+
+$(SOUND_BIN_DIR)/sound_data.tbl.be.64: $(SOUND_BIN_DIR)/sound_data.ctl.be.64
+	@true
+
+$(SOUND_BIN_DIR)/sound_data.tbl.be.32: $(SOUND_BIN_DIR)/sound_data.ctl.be.32
+	@true
+
+$(SOUND_BIN_DIR)/sound_data.tbl.le.64: $(SOUND_BIN_DIR)/sound_data.ctl.le.64
+	@true
+
+$(SOUND_BIN_DIR)/sound_data.tbl.le.32: $(SOUND_BIN_DIR)/sound_data.ctl.le.32
 	@true
 
 $(SOUND_BIN_DIR)/ctl_header: $(SOUND_BIN_DIR)/sound_data.ctl
@@ -1373,11 +1443,28 @@ $(SOUND_BIN_DIR)/ctl_header: $(SOUND_BIN_DIR)/sound_data.ctl
 $(SOUND_BIN_DIR)/tbl_header: $(SOUND_BIN_DIR)/sound_data.ctl
 	@true
 
-$(SOUND_BIN_DIR)/sequences.bin: $(SOUND_BANK_FILES) sound/sequences.json $(SOUND_SEQUENCE_DIRS) $(SOUND_SEQUENCE_FILES) $(ENDIAN_BITWIDTH)
-	@$(PRINT) "$(GREEN)Generating:  $(BLUE)$@ $(NO_COL)\n"
-	$(V)$(PYTHON) $(TOOLS_DIR)/assemble_sound.py --sequences $@ $(SOUND_BIN_DIR)/sequences_header $(SOUND_BIN_DIR)/bank_sets sound/sound_banks/ sound/sequences.json $(SOUND_SEQUENCE_FILES) $(C_DEFINES) $$(cat $(ENDIAN_BITWIDTH))
+$(SOUND_BIN_DIR)/sequences.bin.be.64: $(SOUND_BANK_FILES) sound/sequences.json sound/sequences/ sound/sequences/jp/ $(SOUND_SEQUENCE_FILES)
+	$(PYTHON) tools/assemble_sound.py --sequences $@ $(SOUND_BIN_DIR)/bank_sets.be.64 sound/sound_banks/ sound/sequences.json $(SOUND_SEQUENCE_FILES) $(VERSION_CFLAGS) --endian big --bitwidth 64
 
-$(SOUND_BIN_DIR)/bank_sets: $(SOUND_BIN_DIR)/sequences.bin
+$(SOUND_BIN_DIR)/sequences.bin.be.32: $(SOUND_BANK_FILES) sound/sequences.json sound/sequences/ sound/sequences/jp/ $(SOUND_SEQUENCE_FILES)
+	$(PYTHON) tools/assemble_sound.py --sequences $@ $(SOUND_BIN_DIR)/bank_sets.be.32 sound/sound_banks/ sound/sequences.json $(SOUND_SEQUENCE_FILES) $(VERSION_CFLAGS) --endian big --bitwidth 32
+
+$(SOUND_BIN_DIR)/sequences.bin.le.64: $(SOUND_BANK_FILES) sound/sequences.json sound/sequences/ sound/sequences/jp/ $(SOUND_SEQUENCE_FILES)
+	$(PYTHON) tools/assemble_sound.py --sequences $@ $(SOUND_BIN_DIR)/bank_sets.le.64 sound/sound_banks/ sound/sequences.json $(SOUND_SEQUENCE_FILES) $(VERSION_CFLAGS) --endian little --bitwidth 64
+
+$(SOUND_BIN_DIR)/sequences.bin.le.32: $(SOUND_BANK_FILES) sound/sequences.json sound/sequences/ sound/sequences/jp/ $(SOUND_SEQUENCE_FILES)
+	$(PYTHON) tools/assemble_sound.py --sequences $@ $(SOUND_BIN_DIR)/bank_sets.le.32 sound/sound_banks/ sound/sequences.json $(SOUND_SEQUENCE_FILES) $(VERSION_CFLAGS) --endian little --bitwidth 32
+
+$(SOUND_BIN_DIR)/bank_sets.be.64: $(SOUND_BIN_DIR)/sequences.bin.be.64
+	@true
+
+$(SOUND_BIN_DIR)/bank_sets.be.32: $(SOUND_BIN_DIR)/sequences.bin.be.32
+	@true
+
+$(SOUND_BIN_DIR)/bank_sets.le.64: $(SOUND_BIN_DIR)/sequences.bin.le.64
+	@true
+
+$(SOUND_BIN_DIR)/bank_sets.le.32: $(SOUND_BIN_DIR)/sequences.bin.le.32
 	@true
 
 $(SOUND_BIN_DIR)/sequences_header: $(SOUND_BIN_DIR)/sequences.bin
@@ -1571,6 +1658,29 @@ ifeq ($(TARGET_N64),1)
   $(BUILD_DIR)/$(TARGET).objdump: $(ELF)
 	$(OBJDUMP) -D $< > $@
 else
+
+ifeq ($(TARGET_ANDROID),1)
+APK_FILES := $(shell find android/ -type f)
+
+$(APK): $(EXE) $(APK_FILES)
+	cp -r android $(BUILD_DIR) && \
+	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cp $(EXE) $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cd $(BUILD_DIR)/android && \
+	zip -r ../../../$@ ./* && \
+	cd ../../.. && \
+	rm -rf $(BUILD_DIR)/android
+
+ifeq ($(OLD_APKSIGNER),1)
+$(APK_SIGNED): $(APK)
+	apksigner $(BUILD_DIR)/keystore $< $@
+else
+$(APK_SIGNED): $(APK)
+	cp $< $@
+	apksigner sign --cert certificate.pem --key key.pk8 $@
+endif
+endif
+
   $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS) $(BUILD_DIR)/$(DISCORD_SDK_LIBS) $(BUILD_DIR)/$(BASS_LIBS) $(BUILD_DIR)/$(MOD_DIR)
 	@$(PRINT) "$(GREEN)Linking executable: $(BLUE)$@ $(NO_COL)\n"
 	$(V)$(LD) $(PROF_FLAGS) -L $(BUILD_DIR) -o $@ $(O_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS) $(EXTRA_INCLUDES)

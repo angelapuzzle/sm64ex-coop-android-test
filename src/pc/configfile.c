@@ -60,9 +60,9 @@ ConfigWindow configWindow       = {
     .y = WAPI_WIN_CENTERPOS,
     .w = DESIRED_SCREEN_WIDTH,
     .h = DESIRED_SCREEN_HEIGHT,
-    .vsync = 0,
+    .vsync = 1,
     .reset = false,
-    .fullscreen = false,
+    .fullscreen = true,
     .exiting_fullscreen = false,
     .settings_changed = false,
 };
@@ -73,14 +73,14 @@ unsigned int configSfxVolume = MAX_VOLUME;
 unsigned int configEnvVolume = MAX_VOLUME;
 
 // Keyboard mappings (VK_ values, by default keyboard/gamepad/mouse)
-unsigned int configKeyA[MAX_BINDS]          = { 0x0026,   0x1000,     0x1103     };
-unsigned int configKeyB[MAX_BINDS]          = { 0x0033,   0x1001,     0x1101     };
+unsigned int configKeyA[MAX_BINDS]          = { 0x0026,   0x1000,     VK_INVALID };
+unsigned int configKeyB[MAX_BINDS]          = { 0x0033,   0x1001,     VK_INVALID };
 unsigned int configKeyX[MAX_BINDS]          = { 0x0017,   0x1002,     VK_INVALID };
 unsigned int configKeyY[MAX_BINDS]          = { 0x0032,   0x1003,     VK_INVALID };
 unsigned int configKeyStart[MAX_BINDS]      = { 0x0039,   0x1006,     VK_INVALID };
-unsigned int configKeyL[MAX_BINDS]          = { 0x002A,   0x1009,     0x1104     };
-unsigned int configKeyR[MAX_BINDS]          = { 0x0036,   0x100A,     0x101B     };
-unsigned int configKeyZ[MAX_BINDS]          = { 0x0025,   0x1007,     0x101A     };
+unsigned int configKeyL[MAX_BINDS]          = { 0x002A,   0x1009,     VK_INVALID };
+unsigned int configKeyR[MAX_BINDS]          = { 0x0036,   0x100A,     VK_INVALID };
+unsigned int configKeyZ[MAX_BINDS]          = { 0x0025,   0x1007,     VK_INVALID };
 unsigned int configKeyCUp[MAX_BINDS]        = { 0x0148,   VK_INVALID, VK_INVALID };
 unsigned int configKeyCDown[MAX_BINDS]      = { 0x0150,   VK_INVALID, VK_INVALID };
 unsigned int configKeyCLeft[MAX_BINDS]      = { 0x014B,   VK_INVALID, VK_INVALID };
