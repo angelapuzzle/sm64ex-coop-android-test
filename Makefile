@@ -1613,8 +1613,8 @@ $(APK): $(EXE) $(APK_FILES)
 	cp $(PREFIX)/lib/libz.so.1 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(EXE) $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
-	cp libbass.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
-	cp libbass_fx.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cp $(BUILD_DIR)/libbass.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cp $(BUILD_DIR)/libbass_fx.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cd $(BUILD_DIR)/android && \
 	zip -r ../../../$@ ./* && \
 	cd ../../.. && \
