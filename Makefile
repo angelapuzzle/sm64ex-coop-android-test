@@ -1610,7 +1610,7 @@ APK_FILES := $(shell find android/ -type f)
 
 $(APK): $(EXE) $(APK_FILES)
 	cp -r android $(BUILD_DIR) && \
-	cp ../usr/lib/libz.so.1 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cp $(PREFIX)/lib/libz.so.1 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(EXE) $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cd $(BUILD_DIR)/android && \
