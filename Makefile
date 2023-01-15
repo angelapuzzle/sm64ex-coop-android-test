@@ -1613,6 +1613,7 @@ $(APK): $(EXE) $(APK_FILES)
 	cp $(PREFIX)/lib/libz.so.1 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(HOME)/ubuntu20-fs/lib/aarch64-linux-gnu/libc.so.6 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cp $(HOME)/ubuntu20-fs/lib/aarch64-linux-gnu/libdl.so.2 $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(EXE) $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(BUILD_DIR)/libbass.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
 	cp $(BUILD_DIR)/libbass_fx.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
